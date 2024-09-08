@@ -1,0 +1,41 @@
+name: densitda
+channels:
+  - apple
+  - conda-forge
+dependencies:
+    - python=3.10
+    - pip>=19.0
+    - jupyter
+    - python-igraph
+    - gudhi
+    - sage
+    - scikit-learn
+    - scipy
+    - pandas
+    - pandas-datareader
+    - matplotlib
+    - pillow
+    - tqdm
+    - requests
+    - h5py
+    - pyyaml
+    - flask
+    - boto3
+    - ipykernel
+    - seaborn
+    - openpyxl
+    - keras
+    - plotly
+    - trimesh
+    - pyglet
+    - rtree
+    - pip:
+        - tensorflow-macos
+        - tensorflow-metal
+        - bayesian-optimization
+        - gym
+        - kaggle
+        - qpsolvers
+        - daqp
+        - qpsolvers[daqp]
+        
