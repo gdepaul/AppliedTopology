@@ -1,0 +1,197 @@
+from collections import defaultdict
+import numpy as np
+from scipy.sparse.csgraph import connected_components
+import plotly.graph_objs as go
+from itertools import combinations
+import plotly.express as px
+import math 
+
+class SimplexTree: 
+    
+    def __init__(self): 
+        
+        self.X = defaultdict(lambda: defaultdict(list))
+        
+    def __init__(self, initial_dictionary = None):
+        
+        if initial_dictionary is not None: 
+            self.X = initial_dictionary
+        else: 
+            self.X = defaultdict(lambda: defaultdict(list))
+
+    def contains_simplex(self, my_tuple): 
+        
+        curr_level = self.X
+        for index in my_tuple: 
+            if index in curr_level.keys():
+                curr_level = curr_level[index] 
+            else: 
+                return False 
+            
+        return True
+    
+    def simplex_leaves(self, my_tuple): 
+        
+        curr_level = self.X
+        for index in my_tuple: 
+            if index in curr_level.keys():
+                curr_level = curr_level[index] 
+            else: 
+                return [] 
+            
+        return list(curr_level.keys())
+    
+    def add_simplex(self,new_simplex):
+    
+        curr_level = self.X
+        for index in new_simplex[:-1]: 
+            if index in curr_level.keys():
+                curr_level = curr_level[index] 
+            else: 
+                return False 
+        
+        curr_level[new_simplex[-1]] = defaultdict(lambda: defaultdict(list))
+        
+        return True
+    
+def draw_geometric_simplcial_complex(cplx, S, draw_points = True, draw_edges = True, draw_surfaces = True):
+
+    node_names = []
+    k = 0
+    node_2_idx = {}
+    for node, val in cplx[0]:
+        node_names.append(node[0])
+        node_2_idx[node[0]] = k
+        k += 1
+        
+    D = max(cplx.keys())
+    
+    max_name = len(node_names)
+
+    edge_list = []
+    Y = np.zeros((max_name, max_name))
+
+    for edge, val in cplx[1]: 
+        edge_list.append([node_2_idx[edge[0]], node_2_idx[edge[1]]])
+        Y[node_2_idx[edge[0]], node_2_idx[edge[1]]] = 1
+
+    groups = connected_components(Y)[1]
+
+    fig = go.Figure()
+    
+    things_to_plot = []
+        
+    if draw_points:    
+        things_to_plot.append(
+            go.Scatter3d(x=S[:,0], y=S[:,1], z=S[:,2],
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=groups,                # set color to an array/list of desired values
+                    colorscale=px.colors.qualitative.Dark24,   # choose a colorscale
+                    opacity=1
+                    ), 
+                hoverinfo='none',
+                showlegend=False)
+        )
+    
+    if draw_edges:
+        Xe=[]
+        Ye=[]
+        Ze=[]
+        for e in edge_list:
+            Xe+=[S[e[0]][0],S[e[1]][0], None]# x-coordinates of edge ends
+            Ye+=[S[e[0]][1],S[e[1]][1], None]
+            Ze+=[S[e[0]][2],S[e[1]][2], None]
+
+        things_to_plot.append(
+                    go.Scatter3d(x=Xe,
+                       y=Ye,
+                       z=Ze,
+                       mode='lines',
+                       line=dict(color='rgb(125,125,125)', width=1),
+                       hoverinfo='none',
+                       showlegend=False
+                    )
+            )
+    
+    if draw_surfaces:
+        i = []
+        j = []
+        k = []
+        for simplex, val in cplx[3]:
+            if len(simplex) == D + 1:
+                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                    i.append(node_2_idx[idx_1])
+                    j.append(node_2_idx[idx_2])
+                    k.append(node_2_idx[idx_3])
+
+        i = np.array(i)
+        j = np.array(j)
+        k = np.array(k)
+
+        things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='purple', i=i, j=j, k=k,hoverinfo='none'))
+
+        i = []
+        j = []
+        k = []
+        for simplex, val in cplx[2]:
+            if len(simplex) == D:
+                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                    i.append(node_2_idx[idx_1])
+                    j.append(node_2_idx[idx_2])
+                    k.append(node_2_idx[idx_3])
+
+        i = np.array(i)
+        j = np.array(j)
+        k = np.array(k)
+
+        things_to_plot.append(go.Mesh3d(x=S[:,0], y=S[:,1], z=S[:,2],alphahull=5, opacity=0.4, color='cyan', i=i, j=j, k=k,hoverinfo='none'))
+    
+    layout = go.Layout(
+            autosize=False,
+            width=1000,
+            height=1000
+        )
+            
+    fig = go.Figure(data=things_to_plot, layout=layout)
+
+    fig.update_scenes(xaxis_visible=False, yaxis_visible=False,zaxis_visible=False )
+            
+    fig.show()
+    
+def VRipsHelper_3(indices, Y, Sigma): 
+        
+    simplices_to_add = []
+    for index in indices: 
+        value = 0
+        simplex = Sigma[index]
+        for subface in combinations(simplex, 2):
+            value = max(Y[subface[0],subface[1]], value)
+
+        if value != math.inf:
+            simplices_to_add.append((simplex, value))
+
+    return simplices_to_add
+
+def VRipsHelper_2(batch_indices, visited_prev_word_list, initial_dictionary): 
+    
+    X = SimplexTree(initial_dictionary = initial_dictionary)
+    
+    Sigma = []
+    
+    for index in batch_indices: 
+        word = visited_prev_word_list[index]
+        indices = X.simplex_leaves(word)
+        for choose_pair in itertools.combinations(indices, r = 2):
+            suggested_word = word + list(choose_pair)
+            flag = True
+            for subsimplex in list(itertools.combinations(suggested_word, len(suggested_word) - 1)):
+                if not X.contains_simplex(subsimplex): 
+                    flag = False
+                    break
+                    
+            if flag:
+                Sigma.append(word + list(choose_pair))
+                
+    return Sigma
