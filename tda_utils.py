@@ -2,55 +2,60 @@ from collections import defaultdict
 import numpy as np
 from scipy.sparse.csgraph import connected_components
 import plotly.graph_objs as go
-from itertools import combinations
+import itertools
 import plotly.express as px
 import math 
+from tqdm import tqdm
 
 class SimplexTree: 
     
     def __init__(self): 
         
-        self.X = defaultdict(lambda: defaultdict(list))
-        
-    def __init__(self, initial_dictionary = None):
-        
-        if initial_dictionary is not None: 
-            self.X = initial_dictionary
-        else: 
-            self.X = defaultdict(lambda: defaultdict(list))
+        self.X = [-1, defaultdict(lambda: [ 0.0, defaultdict(list)] ) ]
 
     def contains_simplex(self, my_tuple): 
         
         curr_level = self.X
         for index in my_tuple: 
-            if index in curr_level.keys():
-                curr_level = curr_level[index] 
+            if index in curr_level[1].keys():
+                curr_level = curr_level[1][index] 
             else: 
                 return False 
             
         return True
     
+    def simplex_val(self, my_tuple): 
+        
+        curr_level = self.X
+        for index in my_tuple: 
+            if index in curr_level[1].keys():
+                curr_level = curr_level[1][index] 
+            else: 
+                return math.inf 
+            
+        return curr_level[0]
+    
     def simplex_leaves(self, my_tuple): 
         
         curr_level = self.X
         for index in my_tuple: 
-            if index in curr_level.keys():
-                curr_level = curr_level[index] 
+            if index in curr_level[1].keys():
+                curr_level = curr_level[1][index] 
             else: 
                 return [] 
             
-        return list(curr_level.keys())
+        return list(curr_level[1].keys())
     
-    def add_simplex(self,new_simplex):
+    def add_simplex(self, new_simplex,val):
     
         curr_level = self.X
         for index in new_simplex[:-1]: 
-            if index in curr_level.keys():
-                curr_level = curr_level[index] 
+            if index in curr_level[1].keys():
+                curr_level = curr_level[1][index] 
             else: 
                 return False 
         
-        curr_level[new_simplex[-1]] = defaultdict(lambda: defaultdict(list))
+        curr_level[1][new_simplex[-1]] = [ val, defaultdict(lambda: [ 0.0, defaultdict(list)] ) ]
         
         return True
     
@@ -121,7 +126,7 @@ def draw_geometric_simplcial_complex(cplx, S, draw_points = True, draw_edges = T
         k = []
         for simplex, val in cplx[3]:
             if len(simplex) == D + 1:
-                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                for idx_1, idx_2, idx_3 in list(itertools.combinations(simplex, 3)):
                     i.append(node_2_idx[idx_1])
                     j.append(node_2_idx[idx_2])
                     k.append(node_2_idx[idx_3])
@@ -137,7 +142,7 @@ def draw_geometric_simplcial_complex(cplx, S, draw_points = True, draw_edges = T
         k = []
         for simplex, val in cplx[2]:
             if len(simplex) == D:
-                for idx_1, idx_2, idx_3 in list(combinations(simplex, 3)):
+                for idx_1, idx_2, idx_3 in list(itertools.combinations(simplex, 3)):
                     i.append(node_2_idx[idx_1])
                     j.append(node_2_idx[idx_2])
                     k.append(node_2_idx[idx_3])
@@ -160,38 +165,89 @@ def draw_geometric_simplcial_complex(cplx, S, draw_points = True, draw_edges = T
             
     fig.show()
     
-def VRipsHelper_3(indices, Y, Sigma): 
-        
-    simplices_to_add = []
-    for index in indices: 
-        value = 0
-        simplex = Sigma[index]
-        for subface in combinations(simplex, 2):
-            value = max(Y[subface[0],subface[1]], value)
-
-        if value != math.inf:
-            simplices_to_add.append((simplex, value))
-
-    return simplices_to_add
-
-def VRipsHelper_2(batch_indices, visited_prev_word_list, initial_dictionary): 
+def VietorisRips(S, max_dimension = -1, max_radius = 2): 
     
-    X = SimplexTree(initial_dictionary = initial_dictionary)
+    if max_dimension < 0: 
+        max_dimension = len(S[0,:])
     
-    Sigma = []
+    R = np.sqrt(max_radius)
     
-    for index in batch_indices: 
-        word = visited_prev_word_list[index]
-        indices = X.simplex_leaves(word)
-        for choose_pair in itertools.combinations(indices, r = 2):
-            suggested_word = word + list(choose_pair)
-            flag = True
-            for subsimplex in list(itertools.combinations(suggested_word, len(suggested_word) - 1)):
-                if not X.contains_simplex(subsimplex): 
-                    flag = False
-                    break
-                    
-            if flag:
-                Sigma.append(word + list(choose_pair))
+    VR_complex = defaultdict(list)
+    X = SimplexTree()
+    
+    for i, s in enumerate(S): 
+        VR_complex[0].append(([i], 0.0))
+        X.add_simplex([i], 0.0)
+
+    print("Evaluating Dimension", 1)
+    
+    Y = np.zeros((len(S), len(S)))
+    adjacency = np.zeros((len(S), len(S)))
+    with tqdm(total = len(S) ** 2) as pbar:
+        for i in range(len(S)):
+            curr_row = []
+            for j in range(len(S)): 
+                center_distance = np.linalg.norm(S[i] - S[j])
                 
-    return Sigma
+                if center_distance < max_radius:
+                    VR_complex[1].append(([i,j], center_distance))
+                    Y[i,j] = center_distance
+                    adjacency[i,j] = 1
+                    X.add_simplex([i,j], center_distance)
+                else:
+                    Y[i,j] = math.inf
+
+                pbar.update(1)
+                
+    print("\tNumber of Connected Components: ", connected_components(adjacency)[0])
+
+    for curr_dim in range(2,max_dimension + 1):
+        
+        print("Estimating Number of Facets for dimension ", curr_dim, "Part 1:")
+            
+        facets_to_consider = VR_complex[curr_dim-1]
+        visited_prev_words = SimplexTree()
+        visited_prev_word_list = []
+        
+        with tqdm(total = len(facets_to_consider)) as pbar:
+            for facet, val in facets_to_consider:
+                sub_facet = facet[:-1]
+                if not visited_prev_words.contains_simplex(sub_facet):
+                    visited_prev_words.add_simplex(sub_facet,0.0)
+                    visited_prev_word_list.append(sub_facet)
+                pbar.update(1)
+                    
+        print("Estimating Number of Facets for dimension ", curr_dim, "Part 2:")
+        
+        Sigma = []
+        with tqdm(total = len(visited_prev_word_list)) as pbar:
+            for word in visited_prev_word_list:
+                indices = X.simplex_leaves(word)
+                for choose_pair in itertools.combinations(indices, r = 2):
+                    suggested_word = word + list(choose_pair)
+                    flag = True
+                    for subsimplex in list(itertools.combinations(suggested_word, len(suggested_word) - 1)):
+                        if not X.contains_simplex(subsimplex): 
+                            flag = False
+                            break
+
+                    if flag:
+                        Sigma.append(word + list(choose_pair))
+                        
+                pbar.update(1)
+        
+        print("Evaluating Dimension", curr_dim)
+
+        with tqdm(total = len(Sigma)) as pbar:
+            for simplex in Sigma:
+                value = 0
+                for subface in itertools.combinations(simplex, len(simplex) - 1):
+                    value = max(X.simplex_val(subface), value)
+
+                if value != math.inf:
+                    VR_complex[curr_dim].append((simplex, value))
+                    X.add_simplex(simplex, value)
+
+                pbar.update(1)
+    
+    return VR_complex
