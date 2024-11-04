@@ -12,6 +12,13 @@ To install, run the following command on your conda prompt:
 7. Type in the command: jupyter notebook
 8. Open in the pop up browser window: 2 - Basics of Persistent Homology and TDA.ipynb 
 9. Click Kernel > Restart & Run All 
-10. Check if all the cells with numbers run. If they do, you're all ready! 
+10. Check if all the cells with numbers run. If they do, you're all ready!
+
+Note: For Windows users, you need to install the git/ gh as well as wsl. 
+- wsl: https://learn.microsoft.com/en-us/windows/wsl/install
+
+Note: Need to have git access on your laptop: 
+- Mac: sudo port install gh
+- Windows: sudo apt install gh
 
 Then you should be able to run all of the downloaded examples.
