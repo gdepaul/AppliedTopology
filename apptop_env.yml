@@ -38,4 +38,6 @@ dependencies:
         - qpsolvers
         - daqp
         - qpsolvers[daqp]
+        - pyballmapper
+        - kmapper
         
