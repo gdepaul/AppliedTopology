@@ -1,7 +1,7 @@
 # AppliedTopology
 Applied Topology Lecture Series
 
-To install, run the following command on your conda prompt:
+To install, run the following commands on your conda prompt:
 
 1. Install Anaconda: https://www.anaconda.com/download
 2. Open Conda Prompt (or Terminal for Mac / Linux) 
