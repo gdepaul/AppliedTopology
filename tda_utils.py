@@ -1,5 +1,6 @@
 from collections import defaultdict
 import numpy as np
+from scipy.spatial.distance import cdist
 from scipy.sparse.csgraph import connected_components
 import plotly.graph_objs as go
 import itertools
@@ -8,6 +9,65 @@ import math
 from tqdm import tqdm
 import networkx as nx
 import matplotlib.pyplot as plt
+
+def ordered_voronoi_diagram(X,landmark_points,order):
+    # Step size of the mesh. Decrease to increase the quality of the VQ.
+    h = .02     # point in the mesh [x_min, x_max]x[y_min, y_max].
+
+    # Plot the decision boundary. For that, we will assign a color to each
+    x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+    y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
+
+    # Obtain labels for each point in mesh. Use last trained model.
+    Z = []
+    for i in range(len(xx)):
+        row_labels = []
+        for j in range(len(xx[0])):
+            distances = []
+            for q in landmark_points:
+                distances.append(math.dist((xx[i,j],yy[i,j]), q))
+
+            my_indices = np.argsort(distances)
+
+            label = 0;
+            for k in range(order):
+                label = 10*label + my_indices[k]
+
+            row_labels.append(label)
+        Z.append(row_labels)
+        
+    Z = np.array(Z)
+        
+    values = list(set(list(Z.ravel())))
+    new_values = range(len(values))
+    
+    res = {values[i]: new_values[i] for i in range(len(values))}
+    for i in range(len(Z)):
+        for j in range(len(Z[0])):
+            Z[i,j] = res[Z[i,j]]
+    
+
+    # Put the result into a color plot
+    Z = Z.reshape(xx.shape)
+    plt.figure(figsize=(8, 6), dpi=80)
+    plt.clf()
+    plt.imshow(Z, interpolation='nearest',
+           extent=(xx.min(), xx.max(), yy.min(), yy.max()),
+           cmap='tab20',
+           aspect='auto', origin='lower')
+
+    plt.plot(X[:, 0], X[:, 1], 'k.', markersize=2)
+    # Plot the centroids as a white X
+    centroids = landmark_points
+    plt.scatter(centroids[:, 0], centroids[:, 1],
+            marker='x', s=169, linewidths=3,
+            color='w', zorder=10)
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    plt.xticks(())
+    plt.yticks(())
+    plt.show()
 
 def draw_2d_simplicial_complex(simplicial_complex, pos=None, return_pos=False, ax = None):
     """
@@ -345,3 +405,189 @@ def VietorisRips(S, max_dimension = -1, max_radius = 2):
                 pbar.update(1)
     
     return VR_complex
+
+def SublevelSetFiltration(chosen_landmarks, S, max_dimension = -1, max_radius = 1):
+    
+    n = S.shape[0]
+    
+    V = defaultdict(list)
+    
+    assigned_voronoi_cells = np.argsort(cdist(S, chosen_landmarks), axis=1)
+    
+    for i, curr_point in enumerate(S):
+        V[assigned_voronoi_cells[i][0]].append(curr_point)
+            
+    if max_dimension < 0: 
+        max_dimension = len(S[0,:])
+        
+    VR_complex = defaultdict(list)
+    X = SimplexTree()
+    
+    def simplex_proportion(simplex): 
+        
+        fuzzy = 1
+        
+        simplex_set = set(simplex)
+
+        count = 0
+        for i in range(n): 
+            subface = set(assigned_voronoi_cells[i,0:len(simplex) + fuzzy])
+            if simplex_set.issubset(subface):
+                count += 1
+
+        if count != 0:
+            return 1/count
+        else:
+            return np.inf
+    
+    print("Evaluating Dimension", 0)
+    
+    with tqdm(total = len(chosen_landmarks)) as pbar:
+    
+        for i, s in enumerate(chosen_landmarks): 
+            value = simplex_proportion([i])
+            if value < max_radius:
+                VR_complex[0].append(([i], value))
+                X.add_simplex([i], value)
+            pbar.update(1)
+    
+    print("Evaluating Dimension", 1)
+    
+    Y = np.zeros((len(chosen_landmarks), len(chosen_landmarks)))
+    adjacency = np.zeros((len(chosen_landmarks), len(chosen_landmarks)))
+    with tqdm(total = len(chosen_landmarks) ** 2) as pbar:
+        for i in range(len(chosen_landmarks)):
+            curr_row = []
+            
+            if X.contains_simplex([i]):
+
+                for j in range(len(chosen_landmarks)): 
+                    
+                    if X.contains_simplex([j]):
+
+                        center_distance = simplex_proportion([i,j])
+
+                        if center_distance < max_radius:
+                            VR_complex[1].append(([i,j], center_distance))
+                            Y[i,j] = center_distance
+                            adjacency[i,j] = 1
+                            X.add_simplex([i,j], center_distance)
+                        else:
+                            Y[i,j] = math.inf
+
+                    pbar.update(1)
+                                                
+            else: 
+                pbar.update(len(chosen_landmarks))
+                
+    print("\tNumber of Connected Components: ", connected_components(adjacency)[0])
+
+    for curr_dim in range(2,max_dimension + 1):
+        
+        print("Estimating Number of Facets for dimension ", curr_dim, "Part 1:")
+        
+        facets_to_consider = VR_complex[curr_dim-1]
+        visited_prev_words = SimplexTree()
+        visited_prev_word_list = []
+        
+        if len(facets_to_consider) == 0:
+            print("No facets to consider")
+            break
+        
+        with tqdm(total = len(facets_to_consider)) as pbar:
+            for facet, val in facets_to_consider:
+                sub_facet = facet[:-1]
+                if not visited_prev_words.contains_simplex(sub_facet):
+                    visited_prev_words.add_simplex(sub_facet,0.0)
+                    visited_prev_word_list.append(sub_facet)
+                pbar.update(1)
+                    
+        print("Estimating Number of Facets for dimension ", curr_dim, "Part 2:")
+        
+        if len(visited_prev_word_list) == 0:
+            print("No facets to consider")
+            break
+        
+        Sigma = []
+        with tqdm(total = len(visited_prev_word_list)) as pbar:
+            for word in visited_prev_word_list:
+                indices = X.simplex_leaves(word)
+                for choose_pair in itertools.combinations(indices, r = 2):
+                    suggested_word = word + list(choose_pair)
+                    flag = True
+                    for subsimplex in list(itertools.combinations(suggested_word, len(suggested_word) - 1)):
+                        if not X.contains_simplex(subsimplex): 
+                            flag = False
+                            break
+
+                    if flag:
+                        Sigma.append(word + list(choose_pair))
+                        
+                pbar.update(1)
+        
+        print("Evaluating Dimension", curr_dim)
+        
+        if len(Sigma) == 0:
+            print("No facets to consider")
+            break
+        
+        with tqdm(total = len(Sigma)) as pbar:
+            for simplex in Sigma:
+      
+                value = simplex_proportion(simplex)
+                        
+                if value != math.inf and value < max_radius:
+                    VR_complex[curr_dim].append((simplex, value))
+                    X.add_simplex(simplex, value)
+
+                pbar.update(1)
+    
+    return VR_complex
+
+def mystery_dataset_1():
+    
+    n = 10000
+
+    Theta = 2 * math.pi * np.random.rand(n)
+    V = 2 * math.pi * np.random.rand(n)
+    
+    a = 10
+    b = 5
+    epsilon = 0.1
+    perturb = 20
+
+    def parametrized_mystery(u,v):
+
+        return ((a + b * math.cos(v)) * math.cos(u) + b / perturb * np.random.normal(), (a + b * math.cos(v)) * math.sin(u) + b / perturb * np.random.normal(), b * math.sin(v) * math.cos( u / 2.0 ) + b / perturb * np.random.normal(), b * math.sin(v) * math.sin( u / 2.0 ) + b / perturb * np.random.normal())
+
+    zfunc = np.vectorize(parametrized_mystery)
+
+    X, Y, Z, T = zfunc(Theta, V)
+    
+    return np.stack((X,Y,Z,T)).T
+
+def mystery_dataset_2():
+    
+    n = 10000
+
+    Theta = 2 * math.pi * np.random.rand(n)
+    V = 2 * math.pi * np.random.rand(n)
+    
+    a = 10
+    b = 5
+    epsilon = 0.1
+    perturb = 20
+
+    def parametrized_mystery(u,v):
+
+        x = a * math.cos(u)*math.sin(v)
+        y = a * math.sin(u)*math.sin(v)
+        z = a * math.cos(v)
+    
+        return (y * z, x * z, x * y, 2 * x ** 2 + 3 * y ** 2 + 7 * z ** 2)
+
+    zfunc = np.vectorize(parametrized_mystery)
+
+    X, Y, Z, T = zfunc(Theta, V)
+    
+    return np.stack((X,Y,Z,T)).T
